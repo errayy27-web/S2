@@ -1,0 +1,20 @@
+workflows:
+  android-apk:
+    name: SS OIL Client APK
+    max_build_duration: 60
+    instance_type: linux_x2
+    environment:
+      flutter: stable
+      vars:
+        SUPABASE_URL: https://rxpsezjtjqfksdxcxmuw.supabase.co
+    scripts:
+      - name: Create Android platform
+        script: flutter create --platforms android --project-name ss_oil_client .
+      - name: Install packages
+        script: flutter pub get
+      - name: Build APK
+        script: |
+          if [ -z "${SUPABASE_ANON_KEY:-}" ]; then echo "Missing SUPABASE_ANON_KEY in Codemagic environment"; exit 1; fi
+          flutter build apk --release --dart-define=SUPABASE_URL="$SUPABASE_URL" --dart-define=SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY"
+    artifacts:
+      - build/app/outputs/flutter-apk/*.apk
