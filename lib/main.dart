@@ -30,6 +30,7 @@ class _KasaClientState extends State<KasaClient> {
   DateTime selected = DateTime.now();
   Map<String, dynamic> kasa = {};
   Map<String, dynamic> prices = {};
+  Map<String, dynamic> fuelProducts = {};
   String? error;
   bool busy = false;
   bool get signedIn => accessToken != null;
@@ -88,14 +89,47 @@ class _KasaClientState extends State<KasaClient> {
           if ('${candidate['date']}' == date) value = candidate;
         }
       }
-      final fuel = await _get('ssoil_fuel_daily_prices?sale_date=eq.$date&select=fuel_type,purchase_price,sale_price');
+      // S2 fixed fuel mapping: Benzin=1, Dizel=2, Dizel+=3.
+      final fuel = await _get('ssoil_fuel_daily_prices?sale_date=lte.$date&select=sale_date,fuel_type,purchase_price,sale_price&order=sale_date.desc&limit=3000');
       final nextPrices = <String,dynamic>{};
-      for (final item in fuel) {if (item is Map) nextPrices['${item['fuel_type']}'] = item;}
+      for (final type in ['benzin','dizel','dizel_plus']) {nextPrices[type] = <String,dynamic>{};}
+      for (final raw in fuel) {
+        if (raw is! Map) continue;
+        final type = '${raw['fuel_type']}';
+        if (!nextPrices.containsKey(type)) continue;
+        final target = nextPrices[type] as Map<String,dynamic>;
+        if (target['sale_price'] == null && raw['sale_price'] != null) target['sale_price'] = raw['sale_price'];
+        if (target['purchase_price'] == null && raw['purchase_price'] != null) target['purchase_price'] = raw['purchase_price'];
+      }
+      // Current purchase price is a fallback only for today; never use it for historical dates.
+      if (date == _today()) {
+        final currentPurchases = await _get('ssoil_fuel_purchase_prices?select=fuel_type,purchase_price');
+        for (final raw in currentPurchases) {
+          if (raw is! Map) continue;
+          final type = '${raw['fuel_type']}';
+          if (nextPrices[type] is Map && (nextPrices[type] as Map)['purchase_price'] == null) {
+            (nextPrices[type] as Map)['purchase_price'] = raw['purchase_price'];
+          }
+        }
+      }
+      // Tank data are sourced from the existing products snapshot, never invented.
+      final productsSnapshot = await _get('ssoil_snapshots?kind=eq.products&select=data&limit=1');
+      final nextProducts = <String,dynamic>{};
+      if (productsSnapshot.isNotEmpty && productsSnapshot.first['data'] is Map) {
+        final items = (productsSnapshot.first['data'] as Map)['products'];
+        if (items is List) {
+          for (final raw in items) {
+            if (raw is Map && ['1','2','3'].contains('${raw['id']}')) nextProducts['${raw['id']}'] = raw;
+          }
+        }
+      }
+      // Historical product stock is not archived; show only for the current day.
       if (!mounted) return;
-      setState(() {kasa = value; prices = nextPrices;});
+      setState(() {kasa = value; prices = nextPrices; fuelProducts = date == _today() ? nextProducts : {};});
     } catch (e) {if (mounted) setState(() => error = '$e');}
     finally {if (mounted) setState(() => busy = false);}
   }
+  String _today() {final d=DateTime.now();return '${d.year.toString().padLeft(4,'0')}-${d.month.toString().padLeft(2,'0')}-${d.day.toString().padLeft(2,'0')}';}
   Future<void> logout() async {
     await storage.delete(key: 'ssoil_client_access');
     if (mounted) setState(() {accessToken = null; kasa = {}; prices = {}; error = null;});
@@ -116,11 +150,20 @@ class _KasaClientState extends State<KasaClient> {
       Row(children: [Icon(icon, color: const Color(0xffbd2026)), const SizedBox(width: 9), Text(title, style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w800))]),
       const SizedBox(height: 12), ...children])));
 
-  Widget stockBar(String name,Color color)=>Padding(padding:const EdgeInsets.symmetric(vertical:6),child:Row(children:[
-    Container(width:85,padding:const EdgeInsets.symmetric(vertical:8),decoration:BoxDecoration(color:color,borderRadius:BorderRadius.circular(6)),child:Text(name,textAlign:TextAlign.center,style:TextStyle(color:name=='Dizel'?Colors.black:Colors.white,fontWeight:FontWeight.bold))),
-    const SizedBox(width:12),Expanded(child:ClipRRect(borderRadius:BorderRadius.circular(5),child:LinearProgressIndicator(value:0,minHeight:15,backgroundColor:const Color(0xffeeeeee),color:color))),
-    const SizedBox(width:12),const Text('Veri yok',style:TextStyle(fontSize:12,fontWeight:FontWeight.bold))
-  ]));
+  Widget stockBar(String id,String name,Color color){
+    final product=fuelProducts[id];
+    final stock=product is Map ? n(product['stock']) : null;
+    final stocks=['1','2','3'].map((key) {final p=fuelProducts[key];return p is Map ? (n(p['stock'])??0.0) : 0.0;}).toList();
+    final maxStock=stocks.reduce((a,b)=>a>b?a:b);
+    final ratio=stock==null||maxStock<=0?0.0:(stock/maxStock).clamp(0.0,1.0);
+    return Padding(padding:const EdgeInsets.symmetric(vertical:6),child:Row(children:[
+      Container(width:85,padding:const EdgeInsets.symmetric(vertical:8),decoration:BoxDecoration(color:color,borderRadius:BorderRadius.circular(6)),child:Text(name,textAlign:TextAlign.center,style:TextStyle(color:name=='Dizel'?Colors.black:Colors.white,fontWeight:FontWeight.bold))),
+      const SizedBox(width:12),
+      Expanded(child:TweenAnimationBuilder<double>(tween:Tween(begin:0.0,end:ratio),duration:const Duration(milliseconds:800),builder:(context,v,_)=>ClipRRect(borderRadius:BorderRadius.circular(5),child:LinearProgressIndicator(value:v,minHeight:15,backgroundColor:const Color(0xffeeeeee),color:color)))),
+      const SizedBox(width:12),
+      SizedBox(width:73,child:Text(stock==null?'Veri yok':'${stock.toStringAsFixed(0)} L',textAlign:TextAlign.right,style:const TextStyle(fontSize:12,fontWeight:FontWeight.bold)))
+    ]));
+  }
   Widget priceTable()=>Column(children:[
     Container(padding:const EdgeInsets.symmetric(vertical:10),decoration:BoxDecoration(color:const Color(0xffeeeeee),borderRadius:BorderRadius.circular(6)),child:const Row(children:[
       Expanded(flex:2,child:Text('Yakıt',style:TextStyle(fontWeight:FontWeight.bold))),
@@ -162,10 +205,10 @@ class _KasaClientState extends State<KasaClient> {
       ]),
       group('Satış Grupları', Icons.storefront, [line('Yakıt', kasa['fuel_sales']), line('Market', kasa['market_sales']), line('MTEL Dopuna', kasa['mtel_dopuna']), line('AERO Dopuna', kasa['aero_dopuna'])]),
       group('Yakıt Stokları', Icons.local_gas_station, [
-        stockBar('Dizel',const Color(0xffffd35d)),stockBar('Dizel+',const Color(0xffd2081b)),stockBar('Benzin',const Color(0xff20b75b)),const Text('Tank stokları Supabase’e aktarılmadı.',style:TextStyle(color:Colors.black54,fontSize:12)),
+        stockBar('2','Dizel',const Color(0xffffd35d)),stockBar('3','Dizel+',const Color(0xffd2081b)),stockBar('1','Benzin',const Color(0xff20b75b)),if(fuelProducts.isEmpty) const Text('Bu tarih için yakıt stok kaydı yok.',style:TextStyle(color:Colors.black54,fontSize:12)),
       ]),
       group('Güncel Yakıt Fiyatları', Icons.trending_up, [priceTable()]),
-      Container(padding:const EdgeInsets.all(17),decoration:BoxDecoration(color:const Color(0xffd2081b),borderRadius:BorderRadius.circular(20)),child:Row(children:[const Icon(Icons.monetization_on_outlined,color:Colors.white,size:28),const SizedBox(width:12),const Expanded(child:Text('Günlük Satış',style:TextStyle(color:Colors.white,fontSize:17,fontWeight:FontWeight.bold))),Text(money(n(kasa['cash'])==null||n(kasa['card'])==null?null:n(kasa['cash'])!+n(kasa['card'])!),style:const TextStyle(color:Colors.white,fontSize:21,fontWeight:FontWeight.w900))])),
+      Container(margin:const EdgeInsets.only(bottom:24),padding:const EdgeInsets.symmetric(horizontal:17,vertical:12),decoration:BoxDecoration(color:const Color(0xffd2081b),borderRadius:BorderRadius.circular(20)),child:Row(children:[const Icon(Icons.monetization_on_outlined,color:Colors.white,size:28),const SizedBox(width:12),const Expanded(child:Text('Günlük Satış',style:TextStyle(color:Colors.white,fontSize:17,fontWeight:FontWeight.bold))),Text(money(n(kasa['cash'])==null||n(kasa['card'])==null?null:n(kasa['cash'])!+n(kasa['card'])!),style:const TextStyle(color:Colors.white,fontSize:21,fontWeight:FontWeight.w900))])),
 
     ])));
 }
