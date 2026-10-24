@@ -123,9 +123,17 @@ class _KasaClientState extends State<KasaClient> {
           }
         }
       }
-      // Historical product stock is not archived; show only for the current day.
+      // Daily stock archive is populated by the PC importer once the SmP_S source is connected.
+      // Until then, only the confirmed 30 Aug opening stocks and today's live ART stock exist.
+      final stockRows = await _get('ssoil_fuel_daily_stock?stock_date=eq.$date&select=fuel_id,closing_liters');
+      final archivedProducts = <String,dynamic>{};
+      for (final raw in stockRows) {
+        if (raw is! Map || raw['closing_liters'] == null) continue;
+        final id = '${raw['fuel_id']}';
+        if (['1','2','3'].contains(id)) archivedProducts[id] = {'stock': raw['closing_liters']};
+      }
       if (!mounted) return;
-      setState(() {kasa = value; prices = nextPrices; fuelProducts = date == _today() ? nextProducts : {};});
+      setState(() {kasa = value; prices = nextPrices; fuelProducts = date == _today() ? nextProducts : archivedProducts;});
     } catch (e) {if (mounted) setState(() => error = '$e');}
     finally {if (mounted) setState(() => busy = false);}
   }
