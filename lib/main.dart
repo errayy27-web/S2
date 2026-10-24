@@ -4,7 +4,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 
 const _url = String.fromEnvironment('SUPABASE_URL', defaultValue: 'https://rxpsezjtjqfksdxcxmuw.supabase.co');
-const _anonKey = String.fromEnvironment('SUPABASE_ANON_KEY');
+const _anonKey = String.fromEnvironment('SUPABASE_ANON_KEY', defaultValue: 'sb_publishable_raRn7YXbKCXuFt2j3i-EXQ_dNbMVXEP');
 void main() => runApp(const SsOilClient());
 
 class SsOilClient extends StatelessWidget {
