@@ -22,6 +22,8 @@ workflows:
           PY
       - name: Install packages
         script: flutter pub get
+      - name: Set original SS OIL launcher icon
+        script: dart run flutter_launcher_icons
       - name: Build APK
         script: |
           flutter build apk --release --dart-define=SUPABASE_URL="$SUPABASE_URL"
