@@ -10,6 +10,17 @@ workflows:
     scripts:
       - name: Create Android platform
         script: flutter create --platforms android --project-name ss_oil_client .
+      - name: Allow HTTPS access in release APK
+        script: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('android/app/src/main/AndroidManifest.xml')
+          s=p.read_text()
+          if 'android.permission.INTERNET' not in s:
+              s=s.replace('<application', '<uses-permission android:name="android.permission.INTERNET"/>\\n    <application', 1)
+          s=s.replace('android:label="ss_oil_client"', 'android:label="SS OIL Client"')
+          p.write_text(s)
+          PY
       - name: Install packages
         script: flutter pub get
       - name: Build APK
