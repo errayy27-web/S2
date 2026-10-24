@@ -111,12 +111,33 @@ class _KasaClientState extends State<KasaClient> {
       Text(money(value, unit: unit), style: const TextStyle(fontWeight: FontWeight.w700, color: Color(0xffbd2026))) ]));
   Widget group(String title, IconData icon, List<Widget> children) => Card(
     color: Colors.white, margin: const EdgeInsets.only(bottom: 14),
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: const BorderSide(color: Color(0xffbd2026), width: 1.2)),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(21), side: const BorderSide(color: Color(0xffeeeeee), width: 1)),
     child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Row(children: [Icon(icon, color: const Color(0xffbd2026)), const SizedBox(width: 9), Text(title, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold))]),
-      const Divider(height: 20), ...children])));
+      Row(children: [Icon(icon, color: const Color(0xffbd2026)), const SizedBox(width: 9), Text(title, style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w800))]),
+      const SizedBox(height: 12), ...children])));
+
+  Widget stockBar(String name,Color color)=>Padding(padding:const EdgeInsets.symmetric(vertical:6),child:Row(children:[
+    Container(width:85,padding:const EdgeInsets.symmetric(vertical:8),decoration:BoxDecoration(color:color,borderRadius:BorderRadius.circular(6)),child:Text(name,textAlign:TextAlign.center,style:TextStyle(color:name=='Dizel'?Colors.black:Colors.white,fontWeight:FontWeight.bold))),
+    const SizedBox(width:12),Expanded(child:ClipRRect(borderRadius:BorderRadius.circular(5),child:LinearProgressIndicator(value:0,minHeight:15,backgroundColor:const Color(0xffeeeeee),color:color))),
+    const SizedBox(width:12),const Text('Veri yok',style:TextStyle(fontSize:12,fontWeight:FontWeight.bold))
+  ]));
+  Widget priceTable()=>Column(children:[
+    Container(padding:const EdgeInsets.symmetric(vertical:10),decoration:BoxDecoration(color:const Color(0xffeeeeee),borderRadius:BorderRadius.circular(6)),child:const Row(children:[
+      Expanded(flex:2,child:Text('Yakıt',style:TextStyle(fontWeight:FontWeight.bold))),
+      Expanded(flex:3,child:Text('Alış Fiyatı (KM/L)',textAlign:TextAlign.center,style:TextStyle(fontSize:12,fontWeight:FontWeight.bold))),
+      Expanded(flex:3,child:Text('Güncel Satış Fiyatı (KM/L)',textAlign:TextAlign.center,style:TextStyle(fontSize:12,fontWeight:FontWeight.bold)))
+    ])),
+    for(final item in const [('dizel','Dizel'),('dizel_plus','Dizel+'),('benzin','Benzin')])...[
+      Padding(padding:const EdgeInsets.symmetric(vertical:12),child:Row(children:[
+        Expanded(flex:2,child:Text(item.$2,style:const TextStyle(fontWeight:FontWeight.bold))),
+        Expanded(flex:3,child:Text(money((prices[item.$1] as Map?)?['purchase_price'],unit:'KM/L'),textAlign:TextAlign.center)),
+        Expanded(flex:3,child:Text(money((prices[item.$1] as Map?)?['sale_price'],unit:'KM/L'),textAlign:TextAlign.center,style:const TextStyle(color:Color(0xffd2081b),fontWeight:FontWeight.bold)))
+      ])),
+      if(item.$1!='benzin')const Divider(height:1)
+    ]
+  ]);
   @override Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('SS OIL • Kasa'), actions: signedIn ? [IconButton(tooltip: 'Çıkış', onPressed: logout, icon: const Icon(Icons.logout))] : null),
+    appBar: AppBar(toolbarHeight: 70, backgroundColor: const Color(0xffd2081b), leading: IconButton(icon: const Icon(Icons.menu,size:30),onPressed: () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('SS OIL Client • Kasa')))),title: Row(children: [Container(width:48,height:48,decoration:BoxDecoration(color:Colors.white,borderRadius:BorderRadius.circular(10)),child:Image.asset('assets/ss_oil_logo.jpg',fit:BoxFit.contain,errorBuilder: (_,__,___)=>const Icon(Icons.local_gas_station,color:Color(0xffd2081b)))),const SizedBox(width:12),const Expanded(child:Text('SS OIL • Kasa',style:TextStyle(fontWeight:FontWeight.w800)))]),actions: [IconButton(tooltip:'Ayarlar',onPressed:signedIn?logout:null,icon:const Icon(Icons.settings_outlined,size:30))]),
     body: !signedIn ? Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 430), child: ListView(shrinkWrap: true, padding: const EdgeInsets.all(22), children: [
       const Icon(Icons.local_gas_station, size: 66, color: Color(0xffbd2026)), const SizedBox(height: 12),
       const Text('SS OIL Client', textAlign: TextAlign.center, style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
@@ -134,20 +155,17 @@ class _KasaClientState extends State<KasaClient> {
       if (error != null) Padding(padding: const EdgeInsets.all(8), child: Text(error!, style: const TextStyle(color: Colors.red))),
       if (kasa.isEmpty) const Padding(padding: EdgeInsets.symmetric(vertical: 16), child: Text('Seçilen tarih için Kasa kaydı bulunamadı.')),
       group('Günlük Satış', Icons.payments, [
-        line('Nakit Market', kasa['cash_market']), line('Nakit Yakıt', kasa['cash_fuel']),
+        line('Nakit Yakıt Market', n(kasa['cash_market']) == null || n(kasa['cash_fuel']) == null ? null : n(kasa['cash_market'])! + n(kasa['cash_fuel'])!),
         line('Nakit Dopuna (MTEL + AERO)', n(kasa['mtel_dopuna']) == null || n(kasa['aero_dopuna']) == null ? null : n(kasa['mtel_dopuna'])! + n(kasa['aero_dopuna'])!),
         line('Nakit (Dopuna dahil)', kasa['cash']), line('Kredi Kartı', kasa['card']),
-        line('Genel Toplam', n(kasa['cash']) == null || n(kasa['card']) == null ? null : n(kasa['cash'])! + n(kasa['card'])!),
+        const Divider(height: 22), line('Genel Toplam', n(kasa['cash']) == null || n(kasa['card']) == null ? null : n(kasa['cash'])! + n(kasa['card'])!),
       ]),
       group('Satış Grupları', Icons.storefront, [line('Yakıt', kasa['fuel_sales']), line('Market', kasa['market_sales']), line('MTEL Dopuna', kasa['mtel_dopuna']), line('AERO Dopuna', kasa['aero_dopuna'])]),
       group('Yakıt Stokları', Icons.local_gas_station, [
-        const Text('Stok verisi henüz Supabase Kasa arşivinde bulunmuyor. Mevcut olmayan değer gösterilmez.', style: TextStyle(color: Colors.black54)),
+        stockBar('Dizel',const Color(0xffffd35d)),stockBar('Dizel+',const Color(0xffd2081b)),stockBar('Benzin',const Color(0xff20b75b)),const Text('Tank stokları Supabase’e aktarılmadı.',style:TextStyle(color:Colors.black54,fontSize:12)),
       ]),
-      group('Güncel Yakıt Fiyatları', Icons.price_change, [
-        for (final entry in const [('dizel','Dizel'),('dizel_plus','Dizel+'),('benzin','Benzin')]) ...[
-          line('${entry.$2} Alış', (prices[entry.$1] as Map?)?['purchase_price'], unit: 'KM/L'),
-          line('${entry.$2} Satış', (prices[entry.$1] as Map?)?['sale_price'], unit: 'KM/L'),
-        ]
-      ]),
+      group('Güncel Yakıt Fiyatları', Icons.trending_up, [priceTable()]),
+      Container(padding:const EdgeInsets.all(17),decoration:BoxDecoration(color:const Color(0xffd2081b),borderRadius:BorderRadius.circular(20)),child:Row(children:[const Icon(Icons.monetization_on_outlined,color:Colors.white,size:28),const SizedBox(width:12),const Expanded(child:Text('Günlük Satış',style:TextStyle(color:Colors.white,fontSize:17,fontWeight:FontWeight.bold))),Text(money(n(kasa['cash'])==null||n(kasa['card'])==null?null:n(kasa['cash'])!+n(kasa['card'])!),style:const TextStyle(color:Colors.white,fontSize:21,fontWeight:FontWeight.w900))])),
+
     ])));
 }
