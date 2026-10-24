@@ -17,7 +17,7 @@ workflows:
           p=Path('android/app/src/main/AndroidManifest.xml')
           s=p.read_text()
           if 'android.permission.INTERNET' not in s:
-              s=s.replace('<application', '<uses-permission android:name="android.permission.INTERNET"/>\\n    <application', 1)
+              s=s.replace('<application', '<uses-permission android:name="android.permission.INTERNET"/>'+chr(10)+'    <application', 1)
           s=s.replace('android:label="ss_oil_client"', 'android:label="SS OIL Client"')
           p.write_text(s)
           PY
@@ -25,7 +25,6 @@ workflows:
         script: flutter pub get
       - name: Build APK
         script: |
-          if [ -z "${SUPABASE_ANON_KEY:-}" ]; then echo "Missing SUPABASE_ANON_KEY in Codemagic environment"; exit 1; fi
           flutter build apk --release --dart-define=SUPABASE_URL="$SUPABASE_URL" --dart-define=SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY"
     artifacts:
       - build/app/outputs/flutter-apk/*.apk
