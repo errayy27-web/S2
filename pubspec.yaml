@@ -9,6 +9,12 @@ dependencies:
     sdk: flutter
   http: ^1.2.2
   flutter_secure_storage: ^9.2.4
+dev_dependencies:
+  flutter_launcher_icons: ^0.14.4
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: assets/ss_oil_logo.jpg
 flutter:
   uses-material-design: true
   assets:
