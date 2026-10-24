@@ -1,0 +1,13 @@
+name: ss_oil_client
+description: SS OIL Client - read-only Kasa
+publish_to: none
+version: 1.0.0+1
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.2.2
+  flutter_secure_storage: ^9.2.4
+flutter:
+  uses-material-design: true
