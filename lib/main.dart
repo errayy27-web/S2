@@ -32,6 +32,9 @@ class _KasaClientState extends State<KasaClient> {
   String? refreshToken;
   DateTime? expiresAt;
   Timer? sessionTimer;
+  Timer? historyTimer;
+  bool historySyncing=false;
+  String? lastHistorySync;
   Map<String,dynamic> localArchive={};
   bool offline=false;
   bool cacheReady=false;
@@ -46,7 +49,7 @@ class _KasaClientState extends State<KasaClient> {
   String get date => '${selected.year.toString().padLeft(4,'0')}-${selected.month.toString().padLeft(2,'0')}-${selected.day.toString().padLeft(2,'0')}';
 
   @override void initState() { super.initState(); _restore(); }
-  @override void dispose() {sessionTimer?.cancel(); email.dispose(); password.dispose(); super.dispose(); }
+  @override void dispose() {sessionTimer?.cancel();historyTimer?.cancel(); email.dispose(); password.dispose(); super.dispose(); }
   Future<void> _restore() async {
     final p=await SharedPreferences.getInstance();
     try{localArchive=Map<String,dynamic>.from(jsonDecode(p.getString('ssoil_s2_archive_v1')??'{}'));}catch(_){}
@@ -63,6 +66,7 @@ class _KasaClientState extends State<KasaClient> {
       await _refreshSession();
     }
     await refresh();
+    _startHistorySync();
   }
   void _showCached(){
     final entry=localArchive[date];
@@ -77,6 +81,82 @@ class _KasaClientState extends State<KasaClient> {
     localArchive[date]={'kasa':kasa,'prices':prices,'fuelProducts':fuelProducts};
     final p=await SharedPreferences.getInstance();
     await p.setString('ssoil_s2_archive_v1',jsonEncode(localArchive));
+  }
+  void _startHistorySync(){
+    historyTimer?.cancel();
+    syncAllHistory();
+    historyTimer=Timer.periodic(const Duration(minutes:1),(_)=>syncAllHistory());
+  }
+  Future<List<dynamic>> _allRows(String table,String query)async{
+    final out=<dynamic>[];
+    for(var offset=0;;offset+=500){
+      final part=await _get('$table?$query&limit=500&offset=$offset');
+      out.addAll(part);
+      if(part.length<500)break;
+    }
+    return out;
+  }
+  Future<void> syncAllHistory()async{
+    if(historySyncing||!signedIn)return;
+    historySyncing=true;
+    try{
+      // Fetch the complete remote archive, not just the date currently on screen.
+      final snapshots=await _allRows('ssoil_snapshots','kind=like.kasa%3A%2A&select=kind,data');
+      final pricesRows=await _allRows('ssoil_fuel_daily_prices','select=sale_date,fuel_type,purchase_price,sale_price&order=sale_date.asc');
+      final stockRows=await _allRows('ssoil_fuel_daily_stock','select=stock_date,fuel_id,closing_liters');
+      final dates=<String>{};
+      final snapshotsByDate=<String,Map<String,dynamic>>{};
+      for(final raw in snapshots){
+        if(raw is! Map)continue;
+        final kind='${raw['kind']}';
+        if(!kind.startsWith('kasa:'))continue;
+        final d=kind.substring(5);
+        if(!RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(d))continue;
+        if(raw['data'] is Map){dates.add(d);snapshotsByDate[d]=Map<String,dynamic>.from(raw['data'] as Map);}
+      }
+      for(final raw in pricesRows){if(raw is Map&&raw['sale_date']!=null)dates.add('${raw['sale_date']}');}
+      for(final raw in stockRows){if(raw is Map&&raw['stock_date']!=null)dates.add('${raw['stock_date']}');}
+      // Preserve locally saved days if their remote record is temporarily absent.
+      dates.addAll(localArchive.keys);
+      final sortedDates=dates.toList()..sort();
+      final latestPrice=<String,Map<String,dynamic>>{};
+      final pricesByDay=<String,Map<String,dynamic>>{};
+      final orderedPrices=pricesRows.whereType<Map>().toList()..sort((a,b)=>'${a['sale_date']}'.compareTo('${b['sale_date']}'));
+      var priceIndex=0;
+      for(final d in sortedDates){
+        while(priceIndex<orderedPrices.length&&'${orderedPrices[priceIndex]['sale_date']}'.compareTo(d)<=0){
+          final row=orderedPrices[priceIndex++];
+          final type='${row['fuel_type']}';
+          final prev=latestPrice[type]??<String,dynamic>{};
+          if(row['sale_price']!=null)prev['sale_price']=row['sale_price'];
+          if(row['purchase_price']!=null)prev['purchase_price']=row['purchase_price'];
+          latestPrice[type]=prev;
+        }
+        pricesByDay[d]={for(final type in ['benzin','dizel','dizel_plus'])type:Map<String,dynamic>.from(latestPrice[type]??{})};
+      }
+      final stocksByDay=<String,Map<String,dynamic>>{};
+      for(final raw in stockRows){
+        if(raw is! Map||raw['closing_liters']==null)continue;
+        final d='${raw['stock_date']}',id='${raw['fuel_id']}';
+        if(!['1','2','3'].contains(id))continue;
+        stocksByDay.putIfAbsent(d,()=>{})[id]={'stock':raw['closing_liters']};
+      }
+      final updated=<String,dynamic>{...localArchive};
+      for(final d in sortedDates){
+        final old=updated[d] is Map?Map<String,dynamic>.from(updated[d] as Map):<String,dynamic>{};
+        if(snapshotsByDate.containsKey(d))old['kasa']=snapshotsByDate[d];
+        if(pricesByDay.containsKey(d))old['prices']=pricesByDay[d];
+        if(stocksByDay.containsKey(d))old['fuelProducts']=stocksByDay[d];
+        updated[d]=old;
+      }
+      localArchive=updated;
+      final p=await SharedPreferences.getInstance();
+      await p.setString('ssoil_s2_archive_v1',jsonEncode(localArchive));
+      lastHistorySync=DateTime.now().toIso8601String();
+      if(mounted&&!busy)_showCached();
+    }catch(_){
+      // Keep all previously downloaded days unchanged on connection failures.
+    }finally{historySyncing=false;}
   }
   Future<void> _saveSession(Map<String,dynamic> data)async{
     final token=data['access_token'] as String?;
@@ -131,6 +211,7 @@ class _KasaClientState extends State<KasaClient> {
       if (token == null) throw Exception('Oturum alınamadı');
       await _saveSession(data);
       await refresh();
+      _startHistorySync();
     } catch (e) { if (mounted) setState(() => error = '$e'); }
     finally {if (mounted) setState(() => busy = false);}
   }
@@ -215,7 +296,7 @@ class _KasaClientState extends State<KasaClient> {
   }
   String _today() {final d=DateTime.now();return '${d.year.toString().padLeft(4,'0')}-${d.month.toString().padLeft(2,'0')}-${d.day.toString().padLeft(2,'0')}';}
   Future<void> logout() async {
-    sessionTimer?.cancel();
+    sessionTimer?.cancel();historyTimer?.cancel();
     await storage.delete(key: 'ssoil_client_access');
     await storage.delete(key: 'ssoil_client_refresh');
     await storage.delete(key: 'ssoil_client_expiry');
