@@ -60,7 +60,7 @@ if(rows[0]?.data)next.kasa=rows[0].data;
 const priceMap={};for(const x of prices){const type=x.fuel_type;priceMap[type]??={};if(priceMap[type].sale_price==null&&x.sale_price!=null)priceMap[type].sale_price=x.sale_price;if(priceMap[type].purchase_price==null&&x.purchase_price!=null)priceMap[type].purchase_price=x.purchase_price}next.prices=priceMap;
 if(stocks.length)next.fuelProducts=Object.fromEntries(stocks.map(x=>[String(x.fuel_id),{stock:x.closing_liters}]));
 if(day===today()&&products[0]?.data?.products){const items=products[0].data.products;next.fuelProducts=Object.fromEntries(items.filter(x=>['1','2','3'].includes(String(x.id))).map(x=>[String(x.id),x]));}
-archive[day]=next;await putDay(day,next);render();
+if(JSON.stringify(old)!==JSON.stringify(next)){archive[day]=next;await putDay(day,next);if($('day').value===day)render();}
 }finally{refreshing=false}
 }
 async function syncAll(){
