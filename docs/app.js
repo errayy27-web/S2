@@ -14,7 +14,7 @@ function dbOpen(){return new Promise((resolve,reject)=>{const r=indexedDB.open('
 async function putDay(day,value){const db=await dbOpen();await new Promise((resolve,reject)=>{const t=db.transaction('days','readwrite');t.objectStore('days').put(value,day);t.oncomplete=resolve;t.onerror=()=>reject(t.error)});db.close()}
 async function getAllDays(){const db=await dbOpen();const result=await new Promise((resolve,reject)=>{const t=db.transaction('days','readonly'),s=t.objectStore('days'),r=s.getAllKeys(),v=s.getAll();t.oncomplete=()=>resolve([r.result,v.result]);t.onerror=()=>reject(t.error)});db.close();return Object.fromEntries(result[0].map((k,i)=>[k,result[1][i]]))}
 async function authRefresh(){if(!session?.refresh_token)throw Error('Oturum yenileme bilgisi yok');const r=await fetch(URL+'/auth/v1/token?grant_type=refresh_token',{method:'POST',headers:{apikey:KEY,'Content-Type':'application/json'},body:JSON.stringify({refresh_token:session.refresh_token})});if(!r.ok)throw Error('Oturum yenilenemedi');session=await r.json();session.expiry=Date.now()+(session.expires_in||3600)*1000;localStorage.setItem('ssoil_pwa_session',JSON.stringify(session))}
-async function api(path,retry=true){if(session?.expiry&&Date.now()>session.expiry-120000)await authRefresh();const r=await fetch(URL+'/rest/v1/'+path,{headers:{apikey:KEY,Authorization:'Bearer '+session.access_token}});if(r.status===401&&retry){await authRefresh();return api(path,false)}if(!r.ok)throw Error('Sunucu yanıtı: '+r.status);return r.json()}
+async function api(path,retry=true){if(session?.expiry&&Date.now()>session.expiry-120000)await authRefresh();const r=await fetch(URL+'/rest/v1/'+path,{cache:'no-store',headers:{apikey:KEY,Authorization:'Bearer '+session.access_token}});if(r.status===401&&retry){await authRefresh();return api(path,false)}if(!r.ok)throw Error('Sunucu yanıtı: '+r.status);return r.json()}
 async function allRows(table,query){const result=[];for(let offset=0;offset<100000;offset+=500){const rows=await api(table+'?'+query+'&limit=500&offset='+offset);result.push(...rows);if(rows.length<500)break}return result}
 function line(label,v,unit='KM'){return '<div class="line"><span>'+safe(label)+'</span><b>'+fmt(v,unit)+'</b></div>'}
 function section(title,lines){return '<div class="card"><h2>'+title+'</h2>'+lines+'</div>'}
@@ -51,12 +51,13 @@ if(refreshing||!session||!navigator.onLine)return;
 refreshing=true;
 try{
 const day=$('day').value;
-const rows=await api('ssoil_snapshots?kind=eq.kasa%3A'+day+'&select=data&limit=1');
+const [rows,currentKasa]=await Promise.all([api('ssoil_snapshots?kind=eq.kasa%3A'+day+'&select=data&limit=1'),day===today()?api('ssoil_snapshots?kind=eq.kasa&select=data&limit=1'):Promise.resolve([])]);
 const prices=await api('ssoil_fuel_daily_prices?sale_date=lte.'+day+'&select=sale_date,fuel_type,purchase_price,sale_price&order=sale_date.desc&limit=3000');
 const stocks=await api('ssoil_fuel_daily_stock?stock_date=eq.'+day+'&select=fuel_id,closing_liters');
 const products=day===today()?await api('ssoil_snapshots?kind=eq.products&select=data&limit=1'):[];
 const old=archive[day]||{},next={...old};
 if(rows[0]?.data)next.kasa=rows[0].data;
+if(day===today()&&currentKasa[0]?.data&&String(currentKasa[0].data.date)===day)next.kasa=currentKasa[0].data;
 const priceMap={};for(const x of prices){const type=x.fuel_type;priceMap[type]??={};if(priceMap[type].sale_price==null&&x.sale_price!=null)priceMap[type].sale_price=x.sale_price;if(priceMap[type].purchase_price==null&&x.purchase_price!=null)priceMap[type].purchase_price=x.purchase_price}next.prices=priceMap;
 if(stocks.length)next.fuelProducts=Object.fromEntries(stocks.map(x=>[String(x.fuel_id),{stock:x.closing_liters}]));
 if(day===today()&&products[0]?.data?.products){const items=products[0].data.products;next.fuelProducts=Object.fromEntries(items.filter(x=>['1','2','3'].includes(String(x.id))).map(x=>[String(x.id),x]));}
