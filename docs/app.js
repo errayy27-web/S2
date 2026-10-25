@@ -90,7 +90,7 @@ status('Geçmişler telefona kaydedildi.');render()
 }catch(e){status('Çevrimdışı: telefona kaydedilmiş geçmişler kullanılabilir.')}finally{syncing=false}
 }
 $('signIn').onclick=async()=>{status('Giriş yapılıyor…');try{const r=await fetch(URL+'/auth/v1/token?grant_type=password',{method:'POST',headers:{apikey:KEY,'Content-Type':'application/json'},body:JSON.stringify({email:$('email').value.trim(),password:$('password').value})});if(!r.ok)throw Error('Giriş başarısız');session=await r.json();session.expiry=Date.now()+(session.expires_in||3600)*1000;localStorage.setItem('ssoil_pwa_session',JSON.stringify(session));$('password').value='';view();await syncAll();clearInterval(timer);timer=setInterval(()=>{if(!document.hidden&&navigator.onLine)fetchCurrent().catch(()=>{});},3000)}catch(e){status('Giriş başarısız. Bilgileri ve bağlantıyı kontrol edin.')}};
-$('signOut').onclick=()=>{session=null;localStorage.removeItem('ssoil_pwa_session');clearInterval(timer);view();status('Oturum kapatıldı. Yerel geçmişler silinmedi.')};
+
 $('day').onchange=render;
 $('reload').onclick=async()=>{status('Güncelleniyor…');try{await fetchCurrent();status('Güncellendi')}catch(e){status('Çevrimdışı: kaydedilmiş veriler gösteriliyor.')}};
 $('sync').onclick=syncAll;
