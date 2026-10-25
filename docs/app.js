@@ -2,7 +2,7 @@
 const URL='https://rxpsezjtjqfksdxcxmuw.supabase.co';
 const KEY='sb_publishable_raRn7YXbKCXuFt2j3i-EXQ_dNbMVXEP';
 const $=id=>document.getElementById(id);
-let session=null,archive={},timer=null,syncing=false;
+let session=null,archive={},timer=null,syncing=false,refreshing=false;
 const today=()=>new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);
 $('day').value=today();
 const safe=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -47,6 +47,9 @@ out+='<div class="bottomtotal"><span>◉ &nbsp; Günlük Satış</span><b>'+fmt(
 $('details').innerHTML=out;
 }
 async function fetchCurrent(){
+if(refreshing||!session||!navigator.onLine)return;
+refreshing=true;
+try{
 const day=$('day').value;
 const rows=await api('ssoil_snapshots?kind=eq.kasa%3A'+day+'&select=data&limit=1');
 const prices=await api('ssoil_fuel_daily_prices?sale_date=lte.'+day+'&select=sale_date,fuel_type,purchase_price,sale_price&order=sale_date.desc&limit=3000');
@@ -58,6 +61,7 @@ const priceMap={};for(const x of prices){const type=x.fuel_type;priceMap[type]??
 if(stocks.length)next.fuelProducts=Object.fromEntries(stocks.map(x=>[String(x.fuel_id),{stock:x.closing_liters}]));
 if(day===today()&&products[0]?.data?.products){const items=products[0].data.products;next.fuelProducts=Object.fromEntries(items.filter(x=>['1','2','3'].includes(String(x.id))).map(x=>[String(x.id),x]));}
 archive[day]=next;await putDay(day,next);render();
+}finally{refreshing=false}
 }
 async function syncAll(){
 if(syncing||!session)return;syncing=true;status('Geçmiş veriler güncelleniyor…');
@@ -85,9 +89,9 @@ $('syncInfo').textContent='Son güncelleme: '+new Date().toLocaleString('tr-TR')
 status('Geçmişler telefona kaydedildi.');render()
 }catch(e){status('Çevrimdışı: telefona kaydedilmiş geçmişler kullanılabilir.')}finally{syncing=false}
 }
-$('signIn').onclick=async()=>{status('Giriş yapılıyor…');try{const r=await fetch(URL+'/auth/v1/token?grant_type=password',{method:'POST',headers:{apikey:KEY,'Content-Type':'application/json'},body:JSON.stringify({email:$('email').value.trim(),password:$('password').value})});if(!r.ok)throw Error('Giriş başarısız');session=await r.json();session.expiry=Date.now()+(session.expires_in||3600)*1000;localStorage.setItem('ssoil_pwa_session',JSON.stringify(session));$('password').value='';view();await syncAll()}catch(e){status('Giriş başarısız. Bilgileri ve bağlantıyı kontrol edin.')}};
+$('signIn').onclick=async()=>{status('Giriş yapılıyor…');try{const r=await fetch(URL+'/auth/v1/token?grant_type=password',{method:'POST',headers:{apikey:KEY,'Content-Type':'application/json'},body:JSON.stringify({email:$('email').value.trim(),password:$('password').value})});if(!r.ok)throw Error('Giriş başarısız');session=await r.json();session.expiry=Date.now()+(session.expires_in||3600)*1000;localStorage.setItem('ssoil_pwa_session',JSON.stringify(session));$('password').value='';view();await syncAll();clearInterval(timer);timer=setInterval(()=>{if(!document.hidden&&navigator.onLine)fetchCurrent().catch(()=>{});},3000)}catch(e){status('Giriş başarısız. Bilgileri ve bağlantıyı kontrol edin.')}};
 $('signOut').onclick=()=>{session=null;localStorage.removeItem('ssoil_pwa_session');clearInterval(timer);view();status('Oturum kapatıldı. Yerel geçmişler silinmedi.')};
 $('day').onchange=render;
 $('reload').onclick=async()=>{status('Güncelleniyor…');try{await fetchCurrent();status('Güncellendi')}catch(e){status('Çevrimdışı: kaydedilmiş veriler gösteriliyor.')}};
 $('sync').onclick=syncAll;
-(async()=>{try{archive=await getAllDays()}catch(e){status('Yerel kayıt alanı açılamadı.')}try{session=JSON.parse(localStorage.getItem('ssoil_pwa_session')||'null')}catch(e){}view();status(navigator.onLine?'Hazır.':'Çevrimdışı: kaydedilmiş veriler gösteriliyor.');if(session){syncAll();timer=setInterval(syncAll,60000)}if('serviceWorker'in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{})})();
+(async()=>{try{archive=await getAllDays()}catch(e){status('Yerel kayıt alanı açılamadı.')}try{session=JSON.parse(localStorage.getItem('ssoil_pwa_session')||'null')}catch(e){}view();status(navigator.onLine?'Hazır.':'Çevrimdışı: kaydedilmiş veriler gösteriliyor.');if(session){syncAll();timer=setInterval(()=>{if(!document.hidden&&navigator.onLine)fetchCurrent().catch(()=>{});},3000)}if('serviceWorker'in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{})})();
