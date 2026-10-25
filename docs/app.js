@@ -17,7 +17,7 @@ async function authRefresh(){if(!session?.refresh_token)throw Error('Oturum yeni
 async function api(path,retry=true){if(session?.expiry&&Date.now()>session.expiry-120000)await authRefresh();const r=await fetch(URL+'/rest/v1/'+path,{headers:{apikey:KEY,Authorization:'Bearer '+session.access_token}});if(r.status===401&&retry){await authRefresh();return api(path,false)}if(!r.ok)throw Error('Sunucu yanıtı: '+r.status);return r.json()}
 async function allRows(table,query){const result=[];for(let offset=0;offset<100000;offset+=500){const rows=await api(table+'?'+query+'&limit=500&offset='+offset);result.push(...rows);if(rows.length<500)break}return result}
 function line(label,v,unit='KM'){return '<div class="line"><span>'+safe(label)+'</span><b>'+fmt(v,unit)+'</b></div>'}
-function section(title,lines){return '<div class="card"><h2>'+safe(title)+'</h2>'+lines+'</div>'}
+function section(title,lines){return '<div class="card"><h2>'+title+'</h2>'+lines+'</div>'}
 function val(o,k){return o&&o[k]!=null?o[k]:null}
 function sum(a,b){return num(a)==null||num(b)==null?null:num(a)+num(b)}
 function stockRow(id,name,cls,stocks){const stock=num(stocks?.[id]?.stock),max=Math.max(0,...['1','2','3'].map(k=>num(stocks?.[k]?.stock)||0));return '<div class="stockrow"><span class="fuelname '+cls+'">'+name+'</span><span class="track"><span class="fill '+cls+'" style="width:'+(stock===null||max===0?0:Math.min(100,100*stock/max))+'%"></span></span><b>'+(stock===null?'Veri yok':Math.round(stock).toLocaleString('tr-TR')+' L')+'</b></div>'}
