@@ -1,4 +1,6 @@
 import 'dart:convert';
+import 'dart:async';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
@@ -27,6 +29,12 @@ class _KasaClientState extends State<KasaClient> {
   final email = TextEditingController();
   final password = TextEditingController();
   String? accessToken;
+  String? refreshToken;
+  DateTime? expiresAt;
+  Timer? sessionTimer;
+  Map<String,dynamic> localArchive={};
+  bool offline=false;
+  Future<void>? refreshSessionInFlight;
   DateTime selected = DateTime.now();
   Map<String, dynamic> kasa = {};
   Map<String, dynamic> prices = {};
@@ -37,12 +45,72 @@ class _KasaClientState extends State<KasaClient> {
   String get date => '${selected.year.toString().padLeft(4,'0')}-${selected.month.toString().padLeft(2,'0')}-${selected.day.toString().padLeft(2,'0')}';
 
   @override void initState() { super.initState(); _restore(); }
-  @override void dispose() { email.dispose(); password.dispose(); super.dispose(); }
+  @override void dispose() {sessionTimer?.cancel(); email.dispose(); password.dispose(); super.dispose(); }
   Future<void> _restore() async {
-    final token = await storage.read(key: 'ssoil_client_access');
-    if (!mounted || token == null) return;
-    setState(() => accessToken = token);
+    final p=await SharedPreferences.getInstance();
+    try{localArchive=Map<String,dynamic>.from(jsonDecode(p.getString('ssoil_s2_archive_v1')??'{}'));}catch(_){}
+    _showCached();
+    final token=await storage.read(key:'ssoil_client_access');
+    refreshToken=await storage.read(key:'ssoil_client_refresh');
+    final expiry=await storage.read(key:'ssoil_client_expiry');
+    expiresAt=expiry==null?null:DateTime.tryParse(expiry);
+    if(!mounted||token==null)return;
+    setState(()=>accessToken=token);
+    _startSessionTimer();
+    if(refreshToken!=null&&(expiresAt==null||DateTime.now().isAfter(expiresAt!.subtract(const Duration(minutes:2))))){
+      await _refreshSession();
+    }
     await refresh();
+  }
+  void _showCached(){
+    final entry=localArchive[date];
+    if(entry is! Map||!mounted)return;
+    setState((){
+      kasa=Map<String,dynamic>.from((entry['kasa'] as Map?)??{});
+      prices=Map<String,dynamic>.from((entry['prices'] as Map?)??{});
+      fuelProducts=Map<String,dynamic>.from((entry['fuelProducts'] as Map?)??{});
+    });
+  }
+  Future<void> _cacheDay()async{
+    localArchive[date]={'kasa':kasa,'prices':prices,'fuelProducts':fuelProducts};
+    final p=await SharedPreferences.getInstance();
+    await p.setString('ssoil_s2_archive_v1',jsonEncode(localArchive));
+  }
+  Future<void> _saveSession(Map<String,dynamic> data)async{
+    final token=data['access_token'] as String?;
+    if(token==null||token.isEmpty)throw Exception('Oturum anahtarı alınamadı');
+    accessToken=token;
+    refreshToken=(data['refresh_token'] as String?)??refreshToken;
+    expiresAt=DateTime.now().add(Duration(seconds:(data['expires_in'] as num?)?.toInt()??3600));
+    await storage.write(key:'ssoil_client_access',value:accessToken);
+    if(refreshToken!=null)await storage.write(key:'ssoil_client_refresh',value:refreshToken);
+    await storage.write(key:'ssoil_client_expiry',value:expiresAt!.toIso8601String());
+    _startSessionTimer();
+    if(mounted)setState((){});
+  }
+  void _startSessionTimer(){
+    sessionTimer?.cancel();
+    sessionTimer=Timer.periodic(const Duration(minutes:1),(_){
+      if(signedIn&&refreshToken!=null&&
+       (expiresAt==null||DateTime.now().isAfter(expiresAt!.subtract(const Duration(minutes:5))))){
+        _refreshSession();
+      }
+    });
+  }
+  Future<void> _refreshSession()async{
+    if(refreshSessionInFlight!=null)return refreshSessionInFlight;
+    final task=_doRefreshSession();
+    refreshSessionInFlight=task;
+    try{await task;}finally{refreshSessionInFlight=null;}
+  }
+  Future<void> _doRefreshSession()async{
+    final token=refreshToken;
+    if(token==null||token.isEmpty)throw Exception('Oturum yenileme anahtarı bulunamadı. Bir kez yeniden giriş gerekiyor.');
+    final response=await http.post(Uri.parse('$_url/auth/v1/token?grant_type=refresh_token'),
+      headers:{'apikey':_anonKey,'Content-Type':'application/json'},
+      body:jsonEncode({'refresh_token':token})).timeout(const Duration(seconds:15));
+    if(response.statusCode!=200)throw Exception('Oturum yenilenemedi (${response.statusCode})');
+    await _saveSession(Map<String,dynamic>.from(jsonDecode(response.body) as Map));
   }
   Map<String,String> get headers => {
     'apikey': _anonKey, 'Authorization': 'Bearer ${accessToken ?? _anonKey}',
@@ -59,15 +127,19 @@ class _KasaClientState extends State<KasaClient> {
       final data = jsonDecode(response.body) as Map<String,dynamic>;
       final token = data['access_token'] as String?;
       if (token == null) throw Exception('Oturum alınamadı');
-      await storage.write(key: 'ssoil_client_access', value: token);
-      if (mounted) setState(() => accessToken = token);
+      await _saveSession(data);
       await refresh();
     } catch (e) { if (mounted) setState(() => error = '$e'); }
     finally {if (mounted) setState(() => busy = false);}
   }
   Future<List<dynamic>> _get(String path) async {
-    final response = await http.get(Uri.parse('$_url/rest/v1/$path'), headers: headers).timeout(const Duration(seconds: 15));
-    if (response.statusCode == 401 || response.statusCode == 403) throw Exception('Oturum süresi doldu veya erişim izni yok. Tekrar giriş yapın.');
+    if(refreshToken!=null&&expiresAt!=null&&DateTime.now().isAfter(expiresAt!.subtract(const Duration(minutes:2))))await _refreshSession();
+    var response = await http.get(Uri.parse('$_url/rest/v1/$path'), headers: headers).timeout(const Duration(seconds: 15));
+    if(response.statusCode==401&&refreshToken!=null){
+      await _refreshSession();
+      response=await http.get(Uri.parse('$_url/rest/v1/$path'),headers:headers).timeout(const Duration(seconds:15));
+    }
+    if (response.statusCode == 401 || response.statusCode == 403) throw Exception('Oturum doğrulanamadı veya erişim izni yok.');
     if (response.statusCode != 200) throw Exception('Veri alınamadı (${response.statusCode})');
     final decoded = jsonDecode(response.body);
     if (decoded is! List) throw Exception('Beklenmeyen sunucu yanıtı');
@@ -75,6 +147,7 @@ class _KasaClientState extends State<KasaClient> {
   }
   Future<void> refresh() async {
     if (!signedIn) return;
+    _showCached();
     setState(() {busy = true; error = null;});
     try {
       // Prefer date-specific archive; the generic kasa snapshot is only for the matching date.
@@ -133,13 +206,18 @@ class _KasaClientState extends State<KasaClient> {
         if (['1','2','3'].contains(id)) archivedProducts[id] = {'stock': raw['closing_liters']};
       }
       if (!mounted) return;
-      setState(() {kasa = value; prices = nextPrices; fuelProducts = date == _today() ? nextProducts : archivedProducts;});
-    } catch (e) {if (mounted) setState(() => error = '$e');}
+      setState(() {kasa = value; prices = nextPrices; fuelProducts = date == _today() ? nextProducts : archivedProducts;offline=false;});
+      await _cacheDay();
+    } catch (e) {if (mounted) setState(() {error = 'Çevrimdışı / bağlantı hatası: $e';offline=true;});}
     finally {if (mounted) setState(() => busy = false);}
   }
   String _today() {final d=DateTime.now();return '${d.year.toString().padLeft(4,'0')}-${d.month.toString().padLeft(2,'0')}-${d.day.toString().padLeft(2,'0')}';}
   Future<void> logout() async {
+    sessionTimer?.cancel();
     await storage.delete(key: 'ssoil_client_access');
+    await storage.delete(key: 'ssoil_client_refresh');
+    await storage.delete(key: 'ssoil_client_expiry');
+    refreshToken=null;expiresAt=null;
     if (mounted) setState(() {accessToken = null; kasa = {}; prices = {}; error = null;});
   }
   double? n(dynamic value) => value == null ? null : (value is num ? value.toDouble() : double.tryParse('$value'));
@@ -200,9 +278,10 @@ class _KasaClientState extends State<KasaClient> {
       Row(children: [Expanded(child: Text('Tarih: $date', style: const TextStyle(fontWeight: FontWeight.bold))),
         IconButton(tooltip: 'Tarih seç', icon: const Icon(Icons.calendar_month), onPressed: () async {
           final chosen = await showDatePicker(context: context, initialDate: selected, firstDate: DateTime(2020), lastDate: DateTime(2100));
-          if (chosen != null) {setState(() => selected = chosen); await refresh();}
+          if (chosen != null) {setState(() {selected = chosen;kasa={};prices={};fuelProducts={};});_showCached();await refresh();}
         }), FilledButton.icon(onPressed: busy ? null : refresh, icon: const Icon(Icons.refresh), label: const Text('Güncelle'))]),
       if (busy) const LinearProgressIndicator(),
+      if(offline)const Padding(padding:EdgeInsets.all(8),child:Text('Çevrimdışı: telefonda saklanan kayıtlar gösteriliyor.',style:TextStyle(color:Colors.orange))),
       if (error != null) Padding(padding: const EdgeInsets.all(8), child: Text(error!, style: const TextStyle(color: Colors.red))),
       if (kasa.isEmpty) const Padding(padding: EdgeInsets.symmetric(vertical: 16), child: Text('Seçilen tarih için Kasa kaydı bulunamadı.')),
       group('Günlük Satış', Icons.payments, [
