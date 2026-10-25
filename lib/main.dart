@@ -34,6 +34,7 @@ class _KasaClientState extends State<KasaClient> {
   Timer? sessionTimer;
   Map<String,dynamic> localArchive={};
   bool offline=false;
+  bool cacheReady=false;
   Future<void>? refreshSessionInFlight;
   DateTime selected = DateTime.now();
   Map<String, dynamic> kasa = {};
@@ -49,6 +50,7 @@ class _KasaClientState extends State<KasaClient> {
   Future<void> _restore() async {
     final p=await SharedPreferences.getInstance();
     try{localArchive=Map<String,dynamic>.from(jsonDecode(p.getString('ssoil_s2_archive_v1')??'{}'));}catch(_){}
+    cacheReady=true;
     _showCached();
     final token=await storage.read(key:'ssoil_client_access');
     refreshToken=await storage.read(key:'ssoil_client_refresh');
@@ -208,7 +210,7 @@ class _KasaClientState extends State<KasaClient> {
       if (!mounted) return;
       setState(() {kasa = value; prices = nextPrices; fuelProducts = date == _today() ? nextProducts : archivedProducts;offline=false;});
       await _cacheDay();
-    } catch (e) {if (mounted) setState(() {error = 'Çevrimdışı / bağlantı hatası: $e';offline=true;});}
+    } catch (e) {if (mounted) setState(() {error = null;offline=true;});}
     finally {if (mounted) setState(() => busy = false);}
   }
   String _today() {final d=DateTime.now();return '${d.year.toString().padLeft(4,'0')}-${d.month.toString().padLeft(2,'0')}-${d.day.toString().padLeft(2,'0')}';}
@@ -283,7 +285,7 @@ class _KasaClientState extends State<KasaClient> {
       if (busy) const LinearProgressIndicator(),
       if(offline)const Padding(padding:EdgeInsets.all(8),child:Text('Çevrimdışı: telefonda saklanan kayıtlar gösteriliyor.',style:TextStyle(color:Colors.orange))),
       if (error != null) Padding(padding: const EdgeInsets.all(8), child: Text(error!, style: const TextStyle(color: Colors.red))),
-      if (kasa.isEmpty) const Padding(padding: EdgeInsets.symmetric(vertical: 16), child: Text('Seçilen tarih için Kasa kaydı bulunamadı.')),
+      if (kasa.isEmpty) Padding(padding: const EdgeInsets.symmetric(vertical: 16), child: Text(offline ? 'Bu tarih telefona henüz kaydedilmemiş. İnternete bağlanınca bu tarihi bir kez açın.' : 'Seçilen tarih için Kasa kaydı bulunamadı.')),
       group('Günlük Satış', Icons.payments, [
         line('Nakit Yakıt Market', n(kasa['cash_market']) == null || n(kasa['cash_fuel']) == null ? null : n(kasa['cash_market'])! + n(kasa['cash_fuel'])!),
         line('Nakit Dopuna (MTEL + AERO)', n(kasa['mtel_dopuna']) == null || n(kasa['aero_dopuna']) == null ? null : n(kasa['mtel_dopuna'])! + n(kasa['aero_dopuna'])!),
