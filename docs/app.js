@@ -18,22 +18,32 @@ async function api(path,retry=true){if(session?.expiry&&Date.now()>session.expir
 async function allRows(table,query){const result=[];for(let offset=0;offset<100000;offset+=500){const rows=await api(table+'?'+query+'&limit=500&offset='+offset);result.push(...rows);if(rows.length<500)break}return result}
 function line(label,v,unit='KM'){return '<div class="line"><span>'+safe(label)+'</span><b>'+fmt(v,unit)+'</b></div>'}
 function section(title,lines){return '<div class="card"><h2>'+safe(title)+'</h2>'+lines+'</div>'}
-function find(obj,keys){for(const k of keys)if(obj?.[k]!==undefined&&obj[k]!==null)return obj[k];return null}
+function val(o,k){return o&&o[k]!=null?o[k]:null}
+function sum(a,b){return num(a)==null||num(b)==null?null:num(a)+num(b)}
+function stockRow(id,name,cls,stocks){const stock=num(stocks?.[id]?.stock),max=Math.max(0,...['1','2','3'].map(k=>num(stocks?.[k]?.stock)||0));return '<div class="stockrow"><span class="fuelname '+cls+'">'+name+'</span><span class="track"><span class="fill '+cls+'" style="width:'+(stock===null||max===0?0:Math.min(100,100*stock/max))+'%"></span></span><b>'+(stock===null?'Veri yok':Math.round(stock).toLocaleString('tr-TR')+' L')+'</b></div>'}
+function priceRow(name,p){return '<div class="pricerow"><strong>'+name+'</strong><span>'+(num(p?.purchase_price)===null?'Veri yok':num(p.purchase_price).toFixed(2).replace('.',','))+'</span><b>'+(num(p?.sale_price)===null?'Veri yok':num(p.sale_price).toFixed(2).replace('.',','))+'</b></div>'}
 function render(){
-const day=$('day').value,d=archive[day];if(!d){$('details').innerHTML=section('Geçmiş','<p class="muted">Bu tarih henüz telefona kaydedilmedi. İnternet bağlantısıyla geçmişi indirin.</p>');return}
+const day=$('day').value,d=archive[day];
+if(!d){$('details').innerHTML=section('Geçmiş','<p class="muted">Bu tarih henüz telefona kaydedilmedi. İnternet bağlantısıyla geçmişi indirin.</p>');return}
 const k=d.kasa||{},p=d.prices||{},st=d.fuelProducts||{};
-let out=section('Kasa · '+day,[
-line('Nakit',find(k,['cash','nakit','total_cash','nakit_toplam'])),
-line('Kart',find(k,['card','kart','total_card','kart_toplam'])),
-line('Yakıt',find(k,['fuel','yakit','fuel_total','yakit_toplam'])),
-line('Market',find(k,['market','market_total','market_toplam'])),
-line('MTEL',find(k,['mtel','mtel_total'])),
-line('AERO',find(k,['aero','aero_total']))
+const total=sum(k.cash,k.card);
+let out=section('▣ &nbsp; Günlük Satış',[
+line('Nakit Yakıt Market',sum(k.cash_market,k.cash_fuel)),
+line('Nakit Dopuna (MTEL + AERO)',sum(k.mtel_dopuna,k.aero_dopuna)),
+line('Nakit (Dopuna dahil)',k.cash),
+line('Kredi Kartı',k.card),
+'<div class="total">'+line('Genel Toplam',total)+'</div>'
 ].join(''));
-for(const [id,type,name] of [['1','benzin','Benzin'],['2','dizel','Dizel'],['3','dizel_plus','Dizel+']]){
-const row=p[type]||{},stock=st[id]||{};
-out+=section(name,line('Satış fiyatı',row.sale_price)+line('Alış fiyatı',row.purchase_price)+line('Stok',stock.stock,'L'))}
-out+=section('Kasa kaynak verisi','<details><summary>Kaydın tüm alanlarını göster</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">'+safe(JSON.stringify(k,null,2))+'</pre></details>');
+out+=section('▤ &nbsp; Satış Grupları',[
+line('Yakıt',k.fuel_sales),line('Market',k.market_sales),
+line('MTEL Dopuna',k.mtel_dopuna),line('AERO Dopuna',k.aero_dopuna)
+].join(''));
+out+=section('⛽ &nbsp; Yakıt Stokları',
+stockRow('2','Dizel','diesel',st)+stockRow('3','Dizel+','plus',st)+stockRow('1','Benzin','petrol',st));
+out+=section('↗ &nbsp; Güncel Yakıt Fiyatları',
+'<div class="pricerow pricehead"><strong>Yakıt</strong><span>Alış Fiyatı (KM/L)</span><span>Güncel Satış Fiyatı (KM/L)</span></div>'+
+priceRow('Dizel',p.dizel)+priceRow('Dizel+',p.dizel_plus)+priceRow('Benzin',p.benzin));
+out+='<div class="bottomtotal"><span>◉ &nbsp; Günlük Satış</span><b>'+fmt(total)+'</b></div>';
 $('details').innerHTML=out;
 }
 async function fetchCurrent(){
@@ -41,10 +51,12 @@ const day=$('day').value;
 const rows=await api('ssoil_snapshots?kind=eq.kasa%3A'+day+'&select=data&limit=1');
 const prices=await api('ssoil_fuel_daily_prices?sale_date=lte.'+day+'&select=sale_date,fuel_type,purchase_price,sale_price&order=sale_date.desc&limit=3000');
 const stocks=await api('ssoil_fuel_daily_stock?stock_date=eq.'+day+'&select=fuel_id,closing_liters');
+const products=day===today()?await api('ssoil_snapshots?kind=eq.products&select=data&limit=1'):[];
 const old=archive[day]||{},next={...old};
 if(rows[0]?.data)next.kasa=rows[0].data;
 const priceMap={};for(const x of prices){const type=x.fuel_type;priceMap[type]??={};if(priceMap[type].sale_price==null&&x.sale_price!=null)priceMap[type].sale_price=x.sale_price;if(priceMap[type].purchase_price==null&&x.purchase_price!=null)priceMap[type].purchase_price=x.purchase_price}next.prices=priceMap;
 if(stocks.length)next.fuelProducts=Object.fromEntries(stocks.map(x=>[String(x.fuel_id),{stock:x.closing_liters}]));
+if(day===today()&&products[0]?.data?.products){const items=products[0].data.products;next.fuelProducts=Object.fromEntries(items.filter(x=>['1','2','3'].includes(String(x.id))).map(x=>[String(x.id),x]));}
 archive[day]=next;await putDay(day,next);render();
 }
 async function syncAll(){
@@ -67,6 +79,8 @@ const prev=archive[day]||{};
 const next={...prev,kasa:kasaByDay[day]??prev.kasa??{},prices:Object.fromEntries(['benzin','dizel','dizel_plus'].map(t=>[t,{...(running[t]||{})}])),fuelProducts:stocksByDay[day]??prev.fuelProducts??{}};
 archive[day]=next;await putDay(day,next)
 }
+// Today's live tank stock comes from the products snapshot, as in Android S2.
+try{const products=await api('ssoil_snapshots?kind=eq.products&select=data&limit=1');const items=products[0]?.data?.products;if(Array.isArray(items)){const day=today(),live=Object.fromEntries(items.filter(x=>['1','2','3'].includes(String(x.id))).map(x=>[String(x.id),x]));archive[day]={...(archive[day]||{}),fuelProducts:live};await putDay(day,archive[day]);}}catch(_){}
 $('syncInfo').textContent='Son güncelleme: '+new Date().toLocaleString('tr-TR')+' · '+days.size+' tarih';
 status('Geçmişler telefona kaydedildi.');render()
 }catch(e){status('Çevrimdışı: telefona kaydedilmiş geçmişler kullanılabilir.')}finally{syncing=false}
