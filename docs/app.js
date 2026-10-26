@@ -36,7 +36,7 @@ function gasoilForecast(prices){
  const raw=localStorage.getItem('ssoil_gasoil_change')||'';
  const delta=raw.trim()===''?null:Number(raw.replace(',','.'));
  const change=delta===null||!Number.isFinite(delta)?null:delta;
- const adjustment=change===null?null:change*1.73*1.17/100;
+ const adjustment=change===null?null:change/7.5/100;
  const items=[['Dizel','dizel'],['Dizel+','dizel_plus'],['Benzin','benzin']];
  const rows=items.map(([name,key])=>{
  const purchase=num(prices[key]?.purchase_price);
@@ -49,7 +49,7 @@ function gasoilForecast(prices){
  '<div class="forecastinput"><input id="gasoilChange" type="text" inputmode="decimal" placeholder="Örn. +13,75" value="'+safe(raw)+'"><button id="gasoilCalc">Hesapla</button></div>'+
  '<p class="muted">'+(adjustment===null?'Değişim girilmedi.':(change>=0?'▲ Yükseliş':'▼ Düşüş')+' · Hesaplanan fark: '+(adjustment>=0?'+':'')+adjustment.toFixed(4)+' KM/L')+'</p>'+
  '<h3>Sonraki gün tahmini alış fiyatı</h3>'+rows+
- '<small>Özel hesaplama: değişim × 1,73 × 1,17 ÷ 100. Bu, doğrulanmış piyasa dönüşümü veya gerçek tedarikçi fiyat tahmini değildir. ICE değişimi USD/ton cinsindedir; fenik değildir. Benzin için de aynı varsayımsal fark uygulanır.</small>');
+ '<small>Kullanıcı hesabı: değişim ÷ 7,5 = fenik/L; KM/L için ayrıca 100'e bölünür. Bu pratik tahmindir, resmi piyasa birim dönüşümü değildir. Benzin için de aynı varsayımsal fark uygulanır.</small>');
 }
 function render(){
 const day=$('day').value,d=archive[day];
