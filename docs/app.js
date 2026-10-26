@@ -32,25 +32,6 @@ const expense=tx.filter(t=>t.kind==='bank_expense'&&t.bank_id===id).reduce((a,t)
 return '<div class="bankentry"><h3>'+safe(b.name)+'</h3>'+line('Sabah açılış',opening)+line('Hesaba yatırılan',deposits)+line('Banka tahsilatları',collection)+line('Banka ödemeleri',expense)+'<div class="total">'+line('Güncel hesap',opening+deposits+collection-expense)+'</div></div>';
 }).join(''):'<p class="muted">Kayıtlı banka yok</p>');
 }
-function gasoilForecast(prices){
- const raw=localStorage.getItem('ssoil_gasoil_change')||'';
- const delta=raw.trim()===''?null:Number(raw.replace(',','.'));
- const change=delta===null||!Number.isFinite(delta)?null:delta;
- const adjustment=change===null?null:change/7.5/100;
- const items=[['Dizel','dizel'],['Dizel+','dizel_plus'],['Benzin','benzin']];
- const rows=items.map(([name,key])=>{
- const purchase=num(prices[key]?.purchase_price);
- const next=adjustment===null||purchase===null?null:purchase+adjustment;
- return '<div class="line"><span>'+name+' <small>('+fmt(purchase)+')</small></span><b>'+fmt(next)+'</b></div>';
- }).join('');
- return section('↗ &nbsp; ICE Gas Oil Low Sulphur · Fiyat Takibi',
- '<p class="muted">Piyasa fiyatı ve değişim: <a href="https://www.investing.com/commodities/london-gas-oil" target="_blank" rel="noopener">Investing.com LGOc1</a> · Piyasa verileri gecikmeli olabilir.</p>'+
- '<label for="gasoilChange">Günlük değişim (+ yükseliş / − düşüş), manuel giriş</label>'+
- '<div class="forecastinput"><input id="gasoilChange" type="text" inputmode="decimal" placeholder="Örn. +13,75" value="'+safe(raw)+'"><button id="gasoilCalc">Hesapla</button></div>'+
- '<p class="muted">'+(adjustment===null?'Değişim girilmedi.':(change>=0?'▲ Yükseliş':'▼ Düşüş')+' · Hesaplanan fark: '+(adjustment>=0?'+':'')+adjustment.toFixed(4)+' KM/L')+'</p>'+
- '<h3>Sonraki gün tahmini alış fiyatı</h3>'+rows+
- '<small>Kullanıcı hesabı: değişim ÷ 7,5 = fenik/L; KM/L için ayrıca 100'e bölünür. Bu pratik tahmindir, resmi piyasa birim dönüşümü değildir. Benzin için de aynı varsayımsal fark uygulanır.</small>');
-}
 function render(){
 const day=$('day').value,d=archive[day];
 if(!d){$('details').innerHTML=section('Geçmiş','<p class="muted">Bu tarih henüz telefona kaydedilmedi. İnternet bağlantısıyla geçmişi indirin.</p>')+bankSection({});return}
@@ -73,10 +54,9 @@ stockRow('2','Dizel','diesel',st)+stockRow('3','Dizel+','plus',st)+stockRow('1',
 out+=section('↗ &nbsp; Güncel Yakıt Fiyatları',
 '<div class="pricerow pricehead"><strong>Yakıt</strong><span>Alış Fiyatı (KM/L)</span><span>Güncel Satış Fiyatı (KM/L)</span></div>'+
 priceRow('Dizel',p.dizel)+priceRow('Dizel+',p.dizel_plus)+priceRow('Benzin',p.benzin));
-out+=gasoilForecast(p);
 out+='<div class="bottomtotal"><span>◉ &nbsp; Günlük Satış</span><b>'+fmt(total)+'</b></div>';
 $('details').innerHTML=out;
-const calc=$('gasoilCalc');if(calc)calc.onclick=()=>{localStorage.setItem('ssoil_gasoil_change',$('gasoilChange').value.trim());render()};
+
 }
 async function fetchCurrent(){
 if(refreshing||!session||!navigator.onLine)return;
