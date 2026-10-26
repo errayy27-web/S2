@@ -22,6 +22,16 @@ function val(o,k){return o&&o[k]!=null?o[k]:null}
 function sum(a,b){return num(a)==null||num(b)==null?null:num(a)+num(b)}
 function stockRow(id,name,cls,stocks){const stock=num(stocks?.[id]?.stock),max=Math.max(0,...['1','2','3'].map(k=>num(stocks?.[k]?.stock)||0));return '<div class="stockrow"><span class="fuelname '+cls+'">'+name+'</span><span class="track"><span class="fill '+cls+'" style="width:'+(stock===null||max===0?0:Math.min(100,100*stock/max))+'%"></span></span><b>'+(stock===null?'Veri yok':Math.round(stock).toLocaleString('tr-TR')+' L')+'</b></div>'}
 function priceRow(name,p){return '<div class="pricerow"><strong>'+name+'</strong><span>'+(num(p?.purchase_price)===null?'Veri yok':num(p.purchase_price).toFixed(2).replace('.',','))+'</span><b>'+(num(p?.sale_price)===null?'Veri yok':num(p.sale_price).toFixed(2).replace('.',','))+'</b></div>'}
+function bankSection(d){
+const banks=d.banks||[],tx=d.bankTransactions||[],open=d.bankOpenings||[];
+return section('▣ &nbsp; Bankalar',banks.length?banks.map(b=>{
+const id=b.id,opening=num(open.find(x=>x.bank_id===id)?.opening_balance)||0;
+const deposits=tx.filter(t=>t.kind==='cash_expense'&&/HESABA YATIRILAN|BANKA PARA YATIRMA/i.test(String(t.first_value||'')+' '+String(t.description||''))&&(t.bank_id===id||String(t.second_value||'').toUpperCase().includes(String(b.name||'').toUpperCase()))).reduce((a,t)=>a+(num(t.amount)||0),0);
+const collection=tx.filter(t=>t.kind==='bank_collection'&&t.bank_id===id).reduce((a,t)=>a+(num(t.amount)||0),0);
+const expense=tx.filter(t=>t.kind==='bank_expense'&&t.bank_id===id).reduce((a,t)=>a+(num(t.amount)||0),0);
+return '<div class="bankentry"><h3>'+safe(b.name)+'</h3>'+line('Sabah açılış',opening)+line('Hesaba yatırılan',deposits)+line('Banka tahsilatları',collection)+line('Banka ödemeleri',expense)+'<div class="total">'+line('Güncel hesap',opening+deposits+collection-expense)+'</div></div>';
+}).join(''):'<p class="muted">Kayıtlı banka yok</p>');
+}
 function render(){
 const day=$('day').value,d=archive[day];
 if(!d){$('details').innerHTML=section('Geçmiş','<p class="muted">Bu tarih henüz telefona kaydedilmedi. İnternet bağlantısıyla geçmişi indirin.</p>');return}
@@ -38,6 +48,7 @@ out+=section('▤ &nbsp; Satış Grupları',[
 line('Yakıt',k.fuel_sales),line('Market',k.market_sales),
 line('MTEL Dopuna',k.mtel_dopuna),line('AERO Dopuna',k.aero_dopuna)
 ].join(''));
+out+=bankSection(d);
 out+=section('⛽ &nbsp; Yakıt Stokları',
 stockRow('2','Dizel','diesel',st)+stockRow('3','Dizel+','plus',st)+stockRow('1','Benzin','petrol',st));
 out+=section('↗ &nbsp; Güncel Yakıt Fiyatları',
@@ -55,10 +66,17 @@ const [rows,currentKasa]=await Promise.all([api('ssoil_snapshots?kind=eq.kasa%3A
 const prices=await api('ssoil_fuel_daily_prices?sale_date=lte.'+day+'&select=sale_date,fuel_type,purchase_price,sale_price&order=sale_date.desc&limit=3000');
 const stocks=await api('ssoil_fuel_daily_stock?stock_date=eq.'+day+'&select=fuel_id,closing_liters');
 const products=day===today()?await api('ssoil_snapshots?kind=eq.products&select=data&limit=1'):[];
+const [banks,bankTransactions,bankOpenings,purchasePrices]=await Promise.all([
+api('ssoil_shift_banks?select=id,name,sort_order&deleted_at=is.null&order=sort_order.asc'),
+api('ssoil_shift_transactions?select=kind,first_value,second_value,description,amount,bank_id&business_date=eq.'+day+'&deleted_at=is.null'),
+api('ssoil_shift_bank_opening?select=bank_id,opening_balance&business_date=eq.'+day),
+api('ssoil_fuel_purchase_prices?select=fuel_type,purchase_price,updated_at')
+]);
 const old=archive[day]||{},next={...old};
 if(rows[0]?.data)next.kasa=rows[0].data;
 if(day===today()&&currentKasa[0]?.data&&String(currentKasa[0].data.date)===day)next.kasa=currentKasa[0].data;
-const priceMap={};for(const x of prices){const type=x.fuel_type;priceMap[type]??={};if(priceMap[type].sale_price==null&&x.sale_price!=null)priceMap[type].sale_price=x.sale_price;if(priceMap[type].purchase_price==null&&x.purchase_price!=null)priceMap[type].purchase_price=x.purchase_price}next.prices=priceMap;
+const priceMap={};for(const x of prices){const type=x.fuel_type;priceMap[type]??={};if(priceMap[type].sale_price==null&&x.sale_price!=null)priceMap[type].sale_price=x.sale_price;if(priceMap[type].purchase_price==null&&x.purchase_price!=null)priceMap[type].purchase_price=x.purchase_price}if(day===today()){for(const x of purchasePrices)(priceMap[x.fuel_type]??={}).purchase_price=x.purchase_price;if(products[0]?.data?.products)for(const p of products[0].data.products){const type=({'1':'benzin','2':'dizel','3':'dizel_plus'})[String(p.id)];if(type&&p.price!=null)(priceMap[type]??={}).sale_price=p.price;}}
+next.prices=priceMap;next.banks=banks;next.bankTransactions=bankTransactions;next.bankOpenings=bankOpenings;
 if(stocks.length)next.fuelProducts=Object.fromEntries(stocks.map(x=>[String(x.fuel_id),{stock:x.closing_liters}]));
 if(day===today()&&products[0]?.data?.products){const items=products[0].data.products;next.fuelProducts=Object.fromEntries(items.filter(x=>['1','2','3'].includes(String(x.id))).map(x=>[String(x.id),x]));}
 if(JSON.stringify(old)!==JSON.stringify(next)){archive[day]=next;await putDay(day,next);if($('day').value===day)render();}
@@ -86,6 +104,7 @@ archive[day]=next;await putDay(day,next)
 }
 // Today's live tank stock comes from the products snapshot, as in Android S2.
 try{const products=await api('ssoil_snapshots?kind=eq.products&select=data&limit=1');const items=products[0]?.data?.products;if(Array.isArray(items)){const day=today(),live=Object.fromEntries(items.filter(x=>['1','2','3'].includes(String(x.id))).map(x=>[String(x.id),x]));archive[day]={...(archive[day]||{}),fuelProducts:live};await putDay(day,archive[day]);}}catch(_){}
+await fetchCurrent();
 $('syncInfo').textContent='Son güncelleme: '+new Date().toLocaleString('tr-TR')+' · '+days.size+' tarih';
 status('Geçmişler telefona kaydedildi.');render()
 }catch(e){status('Çevrimdışı: telefona kaydedilmiş geçmişler kullanılabilir.')}finally{syncing=false}
