@@ -32,6 +32,23 @@ const expense=tx.filter(t=>t.kind==='bank_expense'&&t.bank_id===id).reduce((a,t)
 return '<div class="bankentry"><h3>'+safe(b.name)+'</h3>'+line('Sabah açılış',opening)+line('Hesaba yatırılan',deposits)+line('Banka tahsilatları',collection)+line('Banka ödemeleri',expense)+'<div class="total">'+line('Güncel hesap',opening+deposits+collection-expense)+'</div></div>';
 }).join(''):'<p class="muted">Kayıtlı banka yok</p>');
 }
+let gasoilQuote=null,gasoilError='Bağlanıyor…',gasoilLastAttempt=0;
+async function refreshGasoilQuote(){
+ if(!navigator.onLine||Date.now()-gasoilLastAttempt<55000)return;
+ gasoilLastAttempt=Date.now();
+ try{
+ const response=await fetch('https://rxpsezjtjqfksdxcxmuw.supabase.co/functions/v1/ssoil-gasoil-quote',{cache:'no-store'});
+ const q=await response.json();
+ if(!response.ok||!Number.isFinite(q.price)||!Number.isFinite(q.change))throw Error(q.error||'Veri okunamadı');
+ gasoilQuote=q;gasoilError='';
+ }catch(e){gasoilQuote=null;gasoilError='Güncel veri alınamadı';}
+ if(session)render();
+}
+function gasoilPanel(){
+ const q=gasoilQuote;
+ const content=q?'<div style="font-size:30px;font-weight:750">'+q.price.toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})+' <small>USD</small></div><div style="font-size:20px;font-weight:700;color:'+(q.change>=0?'#18a45b':'#d34b50')+'">'+(q.change>0?'+':'')+q.change.toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})+'</div><small>Investing.com · gecikmeli veri · kontrol: '+new Date(q.checked_at).toLocaleTimeString('tr-TR')+'</small>':'<p class="muted">'+safe(gasoilError)+'</p>';
+ return section('⛽ &nbsp; Yakıt Güncel',content);
+}
 function render(){
 const day=$('day').value,d=archive[day];
 if(!d){$('details').innerHTML=section('Geçmiş','<p class="muted">Bu tarih henüz telefona kaydedilmedi. İnternet bağlantısıyla geçmişi indirin.</p>')+bankSection({});return}
@@ -54,6 +71,7 @@ stockRow('2','Dizel','diesel',st)+stockRow('3','Dizel+','plus',st)+stockRow('1',
 out+=section('↗ &nbsp; Güncel Yakıt Fiyatları',
 '<div class="pricerow pricehead"><strong>Yakıt</strong><span>Alış Fiyatı (KM/L)</span><span>Güncel Satış Fiyatı (KM/L)</span></div>'+
 priceRow('Dizel',p.dizel)+priceRow('Dizel+',p.dizel_plus)+priceRow('Benzin',p.benzin));
+out+=gasoilPanel();
 out+='<div class="bottomtotal"><span>◉ &nbsp; Günlük Satış</span><b>'+fmt(total)+'</b></div>';
 $('details').innerHTML=out;
 
@@ -112,9 +130,9 @@ $('syncInfo').textContent='Son güncelleme: '+new Date().toLocaleString('tr-TR')
 status('Geçmişler telefona kaydedildi.');render()
 }catch(e){status('Çevrimdışı: telefona kaydedilmiş geçmişler kullanılabilir.')}finally{syncing=false}
 }
-$('signIn').onclick=async()=>{status('Giriş yapılıyor…');try{const r=await fetch(URL+'/auth/v1/token?grant_type=password',{method:'POST',headers:{apikey:KEY,'Content-Type':'application/json'},body:JSON.stringify({email:$('email').value.trim(),password:$('password').value})});if(!r.ok)throw Error('Giriş başarısız');session=await r.json();session.expiry=Date.now()+(session.expires_in||3600)*1000;localStorage.setItem('ssoil_pwa_session',JSON.stringify(session));$('password').value='';view();await syncAll();clearInterval(timer);timer=setInterval(()=>{if(!document.hidden&&navigator.onLine)fetchCurrent().catch(()=>{});},5000)}catch(e){status('Giriş başarısız. Bilgileri ve bağlantıyı kontrol edin.')}};
+$('signIn').onclick=async()=>{status('Giriş yapılıyor…');try{const r=await fetch(URL+'/auth/v1/token?grant_type=password',{method:'POST',headers:{apikey:KEY,'Content-Type':'application/json'},body:JSON.stringify({email:$('email').value.trim(),password:$('password').value})});if(!r.ok)throw Error('Giriş başarısız');session=await r.json();session.expiry=Date.now()+(session.expires_in||3600)*1000;localStorage.setItem('ssoil_pwa_session',JSON.stringify(session));$('password').value='';view();refreshGasoilQuote();await syncAll();clearInterval(timer);timer=setInterval(()=>{if(!document.hidden&&navigator.onLine)fetchCurrent().catch(()=>{});},5000)}catch(e){status('Giriş başarısız. Bilgileri ve bağlantıyı kontrol edin.')}};
 
 $('day').onchange=render;
 $('reload').onclick=async()=>{status('Güncelleniyor…');try{await fetchCurrent();status('Güncellendi')}catch(e){status('Çevrimdışı: kaydedilmiş veriler gösteriliyor.')}};
 $('sync').onclick=syncAll;
-(async()=>{try{archive=await getAllDays()}catch(e){status('Yerel kayıt alanı açılamadı.')}try{session=JSON.parse(localStorage.getItem('ssoil_pwa_session')||'null')}catch(e){}view();status(navigator.onLine?'Hazır.':'Çevrimdışı: kaydedilmiş veriler gösteriliyor.');if(session){syncAll();timer=setInterval(()=>{if(!document.hidden&&navigator.onLine)fetchCurrent().catch(()=>{});},5000)}if('serviceWorker'in navigator)navigator.serviceWorker.getRegistrations().then(rs=>Promise.all(rs.map(r=>r.unregister()))).catch(()=>{})})();
+(async()=>{try{archive=await getAllDays()}catch(e){status('Yerel kayıt alanı açılamadı.')}try{session=JSON.parse(localStorage.getItem('ssoil_pwa_session')||'null')}catch(e){}view();status(navigator.onLine?'Hazır.':'Çevrimdışı: kaydedilmiş veriler gösteriliyor.');if(session){refreshGasoilQuote();setInterval(()=>{if(!document.hidden)refreshGasoilQuote()},60000);syncAll();timer=setInterval(()=>{if(!document.hidden&&navigator.onLine)fetchCurrent().catch(()=>{});},5000)}if('serviceWorker'in navigator)navigator.serviceWorker.getRegistrations().then(rs=>Promise.all(rs.map(r=>r.unregister()))).catch(()=>{})})();
