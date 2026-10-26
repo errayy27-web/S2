@@ -47,8 +47,8 @@ async function refreshGasoilQuote(){
 function tomorrowFuelEstimate(prices){
  const q=gasoilQuote;
  if(!q||!Number.isFinite(q.change))return '<p class="muted">Tahmin için güncel değişim bekleniyor.</p>';
- // User formula: quote change / 1000 * 7.5, then add 17%.
- const diff=(q.change/1000)*7.5*1.17;
+ // USD change / 7.5 gives fenik; add 17% VAT to the change, then convert fenik to KM.
+ const diff=(q.change/7.5)*1.17/100;
  const values=[['Dizel','dizel'],['Dizel+','dizel_plus'],['Benzin','benzin']];
  const rows=values.map(([label,key])=>{
  const current=num(prices?.[key]?.purchase_price);
