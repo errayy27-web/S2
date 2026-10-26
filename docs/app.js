@@ -44,10 +44,26 @@ async function refreshGasoilQuote(){
  }catch(e){gasoilQuote=null;gasoilError='Güncel veri alınamadı';}
  if(session)render();
 }
-function gasoilPanel(){
+function tomorrowFuelEstimate(prices){
+ const q=gasoilQuote;
+ if(!q||!Number.isFinite(q.change))return '<p class="muted">Tahmin için güncel değişim bekleniyor.</p>';
+ // User-specified approximation: -1.50 -> -0.02 KM/L, i.e. change / 7.5 / 10.
+ const diff=q.change/75;
+ const values=[['Dizel','dizel'],['Dizel+','dizel_plus'],['Benzin','benzin']];
+ const rows=values.map(([label,key])=>{
+ const current=num(prices?.[key]?.purchase_price);
+ const predicted=current===null?null:current+diff;
+ return '<div class="pricerow"><strong>'+label+'</strong><span>'+(current===null?'Veri yok':current.toFixed(2).replace('.',','))+'</span><b>'+(predicted===null?'Veri yok':predicted.toFixed(2).replace('.',','))+'</b></div>';
+ }).join('');
+ return '<div style="margin-top:16px;padding-top:12px;border-top:1px solid #ddd"><h3>Yarınki Tahmini Fiyat</h3>'+
+ '<div class="pricerow pricehead"><strong>Yakıt</strong><span>Şu an alış (KM/L)</span><span>Tahmini alış (KM/L)</span></div>'+rows+
+ '<small>Güncel değişim '+(q.change>0?'+':'')+q.change.toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})+
+ ' · Tahmini fark: '+(diff>=0?'+':'')+diff.toFixed(3).replace('.',',')+' KM/L. Yaklaşık hesap; gerçek yarınki alış fiyatı değildir.</small></div>';
+}
+function gasoilPanel(prices){
  const q=gasoilQuote;
  const content=q?'<div style="font-size:30px;font-weight:750">'+q.price.toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})+' <small>USD</small></div><div style="font-size:20px;font-weight:700;color:'+(q.change>=0?'#18a45b':'#d34b50')+'">'+(q.change>0?'+':'')+q.change.toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})+'</div><small>Investing.com · gecikmeli veri · kontrol: '+new Date(q.checked_at).toLocaleTimeString('tr-TR')+'</small>':'<p class="muted">'+safe(gasoilError)+'</p>';
- return section('⛽ &nbsp; Yakıt Güncel',content);
+ return section('⛽ &nbsp; Yakıt Güncel',content+tomorrowFuelEstimate(prices));
 }
 function render(){
 const day=$('day').value,d=archive[day];
@@ -71,7 +87,7 @@ stockRow('2','Dizel','diesel',st)+stockRow('3','Dizel+','plus',st)+stockRow('1',
 out+=section('↗ &nbsp; Güncel Yakıt Fiyatları',
 '<div class="pricerow pricehead"><strong>Yakıt</strong><span>Alış Fiyatı (KM/L)</span><span>Güncel Satış Fiyatı (KM/L)</span></div>'+
 priceRow('Dizel',p.dizel)+priceRow('Dizel+',p.dizel_plus)+priceRow('Benzin',p.benzin));
-out+=gasoilPanel();
+out+=gasoilPanel(p);
 out+='<div class="bottomtotal"><span>◉ &nbsp; Günlük Satış</span><b>'+fmt(total)+'</b></div>';
 $('details').innerHTML=out;
 
