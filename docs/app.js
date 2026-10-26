@@ -34,7 +34,7 @@ return '<div class="bankentry"><h3>'+safe(b.name)+'</h3>'+line('Sabah açılış
 }
 function render(){
 const day=$('day').value,d=archive[day];
-if(!d){$('details').innerHTML=section('Geçmiş','<p class="muted">Bu tarih henüz telefona kaydedilmedi. İnternet bağlantısıyla geçmişi indirin.</p>');return}
+if(!d){$('details').innerHTML=section('Geçmiş','<p class="muted">Bu tarih henüz telefona kaydedilmedi. İnternet bağlantısıyla geçmişi indirin.</p>')+bankSection({});return}
 const k=d.kasa||{},p=d.prices||{},st=d.fuelProducts||{};
 const total=sum(k.cash,k.card);
 let out=section('▣ &nbsp; Günlük Satış',[
@@ -85,10 +85,11 @@ if(JSON.stringify(old)!==JSON.stringify(next)){archive[day]=next;await putDay(da
 async function syncAll(){
 if(syncing||!session)return;syncing=true;status('Geçmiş veriler güncelleniyor…');
 try{
-const [snapshots,prices,stocks]=await Promise.all([
+const [snapshots,prices,stocks,banks]=await Promise.all([
 allRows('ssoil_snapshots','kind=like.kasa%3A%2A&select=kind,data'),
 allRows('ssoil_fuel_daily_prices','select=sale_date,fuel_type,purchase_price,sale_price&order=sale_date.asc'),
-allRows('ssoil_fuel_daily_stock','select=stock_date,fuel_id,closing_liters')
+allRows('ssoil_fuel_daily_stock','select=stock_date,fuel_id,closing_liters'),
+api('ssoil_shift_banks?select=id,name,sort_order&deleted_at=is.null&order=sort_order.asc')
 ]);
 const days=new Set(Object.keys(archive));const kasaByDay={};
 for(const s of snapshots){const day=String(s.kind||'').slice(5);if(/^\d{4}-\d{2}-\d{2}$/.test(day)&&s.data){days.add(day);kasaByDay[day]=s.data}}
@@ -100,6 +101,7 @@ for(const day of [...days].sort()){
 while(ix<prices.length&&prices[ix].sale_date<=day){const p=prices[ix++],v=running[p.fuel_type]??={};if(p.sale_price!=null)v.sale_price=p.sale_price;if(p.purchase_price!=null)v.purchase_price=p.purchase_price}
 const prev=archive[day]||{};
 const next={...prev,kasa:kasaByDay[day]??prev.kasa??{},prices:Object.fromEntries(['benzin','dizel','dizel_plus'].map(t=>[t,{...(running[t]||{})}])),fuelProducts:stocksByDay[day]??prev.fuelProducts??{}};
+try{const [tx,op]=await Promise.all([api('ssoil_shift_transactions?select=kind,first_value,second_value,description,amount,bank_id&business_date=eq.'+day+'&deleted_at=is.null'),api('ssoil_shift_bank_opening?select=bank_id,opening_balance&business_date=eq.'+day)]);next.banks=banks;next.bankTransactions=tx;next.bankOpenings=op;}catch(e){next.banks=banks;}
 archive[day]=next;await putDay(day,next)
 }
 // Today's live tank stock comes from the products snapshot, as in Android S2.
