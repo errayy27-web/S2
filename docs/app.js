@@ -47,8 +47,8 @@ async function refreshGasoilQuote(){
 function tomorrowFuelEstimate(prices){
  const q=gasoilQuote;
  if(!q||!Number.isFinite(q.change))return '<p class="muted">Tahmin için güncel değişim bekleniyor.</p>';
- // User-specified approximation: -1.50 -> -0.02 KM/L, i.e. change / 7.5 / 10.
- const diff=q.change/75;
+ // User formula: quote change / 1000 * 7.5, then add 17%.
+ const diff=(q.change/1000)*7.5*1.17;
  const values=[['Dizel','dizel'],['Dizel+','dizel_plus'],['Benzin','benzin']];
  const rows=values.map(([label,key])=>{
  const current=num(prices?.[key]?.purchase_price);
