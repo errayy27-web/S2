@@ -22,6 +22,15 @@ function val(o,k){return o&&o[k]!=null?o[k]:null}
 function sum(a,b){return num(a)==null||num(b)==null?null:num(a)+num(b)}
 function stockRow(id,name,cls,stocks){const stock=num(stocks?.[id]?.stock),max=Math.max(0,...['1','2','3'].map(k=>num(stocks?.[k]?.stock)||0));return '<div class="stockrow"><span class="fuelname '+cls+'">'+name+'</span><span class="track"><span class="fill '+cls+'" style="width:'+(stock===null||max===0?0:Math.min(100,100*stock/max))+'%"></span></span><b>'+(stock===null?'Veri yok':Math.round(stock).toLocaleString('tr-TR')+' L')+'</b></div>'}
 function priceRow(name,p){return '<div class="pricerow"><strong>'+name+'</strong><span>'+(num(p?.purchase_price)===null?'Veri yok':num(p.purchase_price).toFixed(2).replace('.',','))+'</span><b>'+(num(p?.sale_price)===null?'Veri yok':num(p.sale_price).toFixed(2).replace('.',','))+'</b></div>'}
+function fuelSalesSection(d){
+ const stocks=d.fuelSales||{},prices=d.prices||{};
+ const types=[['Dizel','2','dizel'],['Dizel+','3','dizel_plus'],['Benzin','1','benzin']];
+ return section('⛽ &nbsp; Yakıt Satış Detayı',types.map(([name,id,key])=>{
+ const liters=num(stocks[id]?.sold_liters),price=num(prices[key]?.sale_price);
+ const amount=liters===null||price===null?null:liters*price;
+ return '<div class="bankentry"><h3>'+name+'</h3>'+line('Satılan litre',liters,'L')+line('Litre satış fiyatı',price,'KM/L')+line('Hesaplanan satış tutarı',amount)+'</div>';
+ }).join('')+'<small>Satış tutarı = satılan litre × kayıtlı satış fiyatı. Gün içindeki fiyat değişikliklerini veya indirimleri ayrı ayrı yansıtmayabilir.</small>');
+}
 function bankSection(d){
 const banks=d.banks||[],tx=d.bankTransactions||[],open=d.bankOpenings||[];
 return section('▣ &nbsp; Bankalar',banks.length?banks.map(b=>{
@@ -81,6 +90,7 @@ out+=section('▤ &nbsp; Satış Grupları',[
 line('Yakıt',k.fuel_sales),line('Market',k.market_sales),
 line('MTEL Dopuna',k.mtel_dopuna),line('AERO Dopuna',k.aero_dopuna)
 ].join(''));
+out+=fuelSalesSection(d);
 out+=bankSection(d);
 out+=section('⛽ &nbsp; Yakıt Stokları',
 stockRow('2','Dizel','diesel',st)+stockRow('3','Dizel+','plus',st)+stockRow('1','Benzin','petrol',st));
@@ -99,7 +109,7 @@ try{
 const day=$('day').value;
 const [rows,currentKasa]=await Promise.all([api('ssoil_snapshots?kind=eq.kasa%3A'+day+'&select=data&limit=1'),day===today()?api('ssoil_snapshots?kind=eq.kasa&select=data&limit=1'):Promise.resolve([])]);
 const prices=await api('ssoil_fuel_daily_prices?sale_date=lte.'+day+'&select=sale_date,fuel_type,purchase_price,sale_price&order=sale_date.desc&limit=3000');
-const stocks=await api('ssoil_fuel_daily_stock?stock_date=eq.'+day+'&select=fuel_id,closing_liters');
+const stocks=await api('ssoil_fuel_daily_stock?stock_date=eq.'+day+'&select=fuel_id,closing_liters,sold_liters');
 const products=day===today()?await api('ssoil_snapshots?kind=eq.products&select=data&limit=1'):[];
 const [banks,bankTransactions,bankOpenings,purchasePrices]=await Promise.all([
 api('ssoil_shift_banks?select=id,name,sort_order&deleted_at=is.null&order=sort_order.asc'),
@@ -111,7 +121,7 @@ const old=archive[day]||{},next={...old};
 if(rows[0]?.data)next.kasa=rows[0].data;
 if(day===today()&&currentKasa[0]?.data&&String(currentKasa[0].data.date)===day)next.kasa=currentKasa[0].data;
 const priceMap={};for(const x of prices){const type=x.fuel_type;priceMap[type]??={};if(priceMap[type].sale_price==null&&x.sale_price!=null)priceMap[type].sale_price=x.sale_price;if(priceMap[type].purchase_price==null&&x.purchase_price!=null)priceMap[type].purchase_price=x.purchase_price}if(day===today()){for(const x of purchasePrices)(priceMap[x.fuel_type]??={}).purchase_price=x.purchase_price;if(products[0]?.data?.products)for(const p of products[0].data.products){const type=({'1':'benzin','2':'dizel','3':'dizel_plus'})[String(p.id)];if(type&&p.price!=null)(priceMap[type]??={}).sale_price=p.price;}}
-next.prices=priceMap;next.banks=banks;next.bankTransactions=bankTransactions;next.bankOpenings=bankOpenings;
+next.prices=priceMap;next.fuelSales=Object.fromEntries(stocks.map(x=>[String(x.fuel_id),{sold_liters:x.sold_liters}]));next.banks=banks;next.bankTransactions=bankTransactions;next.bankOpenings=bankOpenings;
 if(stocks.length)next.fuelProducts=Object.fromEntries(stocks.map(x=>[String(x.fuel_id),{stock:x.closing_liters}]));
 if(day===today()&&products[0]?.data?.products){const items=products[0].data.products;next.fuelProducts=Object.fromEntries(items.filter(x=>['1','2','3'].includes(String(x.id))).map(x=>[String(x.id),x]));}
 if(JSON.stringify(old)!==JSON.stringify(next)){archive[day]=next;await putDay(day,next);if($('day').value===day)render();}
